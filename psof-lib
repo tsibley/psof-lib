@@ -1,0 +1,35 @@
+#!/bin/bash
+set -o pipefail
+case "$1" in
+    --old)
+        if_old="if /path inode/"
+        shift
+        ;;
+esac
+
+if [[ -z $1 ]]; then
+    cat <<.
+usage: `basename $0` [--old] lib-name [lib-name]
+
+example:
+    # Find all procs with libc and libpthread loaded
+    `basename $0` c pthread
+
+    # Find all procs with outdated versions of openssl loaded
+    `basename $0` --old ssl crypto
+.
+    exit
+fi
+pager=${PAGER:-less -SRFX}
+[[ -t 1 ]] && pager=cat
+xargs=`which gxargs 2>/dev/null`    # Use GNU xargs if available
+xargs=${xargs:-xargs}               # otherwise just "xargs"
+name=`perl -e 'print join "|", map { quotemeta(/lib/ ? $_ : "lib$_") } @ARGV' "$@"`
+/usr/sbin/lsof +c0 \
+    | egrep '/('"$name"')\b' \
+    | perl -anle "print \$F[1] $if_old" \
+    | sort -u \
+    | $xargs --no-run-if-empty ps --no-heading -wo pid,user,cmd \
+    | sort -k2 \
+    | uniq -f1 -c \
+    | $pager

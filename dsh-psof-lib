@@ -1,0 +1,46 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use autodie;
+use FindBin qw< $Script $RealBin >;
+
+use constant DSH        => "/usr/local/bin/dsh";
+use constant PARALLEL   => "/usr/local/bin/parallel";
+use constant PSOFLIB    => "$RealBin/psof-lib";
+
+if (not @ARGV or $ARGV[0] =~ /^-h|--help$/) {
+    print <<USAGE;
+usage: $Script <dsh options> -- <psof-lib options>
+
+Transfers psof-lib to hosts described by dsh node selection options and then
+runs psof-lib with the given options on those nodes using dsh.
+USAGE
+    exit;
+}
+
+my (@dsh, @psoflib);
+my $seen_dashdash;
+for (@ARGV) {
+    if ($_ eq "--") {
+        $seen_dashdash++;
+        next;
+    }
+    if (!$seen_dashdash) { push @dsh,     $_ }
+    else                 { push @psoflib, $_ }
+}
+
+my @hosts = do {
+    no autodie;
+    open my $hosts, '-|', DSH, "-q", @dsh
+        or die "couldn't get host list from dsh: $!";
+    my @hosts = map { chomp; $_ } <$hosts>;
+    close $hosts or die "close failed: $!";
+    @hosts;
+};
+
+system { PARALLEL }
+    "parallel", "--no-notice", "--halt=2",
+        "scp", "-Bq", PSOFLIB, "{}:/tmp",
+    ":::", @hosts;
+
+exec { DSH } "dsh", @dsh, '/tmp/psof-lib', @psoflib;
